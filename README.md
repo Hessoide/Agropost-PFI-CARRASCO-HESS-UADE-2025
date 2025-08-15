@@ -15,11 +15,11 @@ Desarrollar un sistema basado en GNSS y RTK que permita obtener ubicación preci
 - LoRa
 - Leaflet.js para mapas
 
-Como correr el proyecto:
-cd frontend
-npm install
-npm run build
-cd ..
-cd backend
-pip install -r requirements.txt
-uvicorn agropost.main:app --host 0.0.0.0 --port 8000
+## Como correr el proyecto:
+- cd frontend
+- npm install
+- npm run build
+- cd ..
+- cd backend
+- pip install -r requirements.txt
+- uvicorn agropost.main:app --host 0.0.0.0 --port 8000
