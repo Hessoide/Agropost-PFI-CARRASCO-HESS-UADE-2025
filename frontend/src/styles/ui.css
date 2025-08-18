@@ -1,0 +1,21 @@
+/* Botón unificado para <button> y <a> */
+button.btn, a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  padding: .6rem .9rem;
+  border-radius: .5rem;
+  border: 1px solid #ccc;
+  background: #fff;
+  text-decoration: none;
+  font: inherit;
+  line-height: 1;            /* evita texto “desbordado” */
+  box-sizing: border-box;    /* bordes/padding dentro del ancho */
+  cursor: pointer;
+  user-select: none;
+}
+button.btn:focus, a.btn:focus {
+  outline: 2px solid #333;
+  outline-offset: 2px;
+}

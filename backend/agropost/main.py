@@ -23,7 +23,7 @@ async def ws_pos(ws: WebSocket):
         i += 1
         await asyncio.sleep(1)
 
-@app.get("/health")
+@app.get("api/health")
 def health(): return {"ok": True}
 
 # Para run local:
