@@ -1,4 +1,4 @@
-<script> import BackButton from "../components/BackButton.svelte"; </script>
+
 <div class="header"><a href="#/" class="btn">Inicio</a></div>
 
 <h2>Registros</h2>

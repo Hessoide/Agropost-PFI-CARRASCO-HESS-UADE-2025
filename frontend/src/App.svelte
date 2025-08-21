@@ -15,23 +15,26 @@
   };
 
   let route = currentRoute();
+  let fullHash = location.hash || "#/";  
 
   function currentRoute() {
-    // ejemplo: "#/map" -> "/map"
-    const hash = (location.hash || "").replace(/^#/, "");
-    return hash || "/";
+    // "#/map?lat=..&lon=.." -> "/map"
+    const raw = (location.hash || "#/").replace(/^#/, "");
+    const pathOnly = raw.split("?")[0];      // quita query
+    const normalized = pathOnly.replace(/\/+$/, "") || "/"; // quita "/" final
+    return normalized;
   }
 
   function onHashChange() {
+    fullHash = location.hash || "#/"; 
     route = currentRoute();
     // opcional: scroll al top
     window.scrollTo({ top: 0, behavior: "instant" });
   }
 
   onMount(() => {
+    if (!location.hash) location.hash = "#/"; // home por defecto
     window.addEventListener("hashchange", onHashChange);
-    // si entrás directo sin hash, asegurá home
-    if (!location.hash) location.hash = "#/";
     return () => window.removeEventListener("hashchange", onHashChange);
   });
 
@@ -39,4 +42,6 @@
   $: Page = routes[route] ?? NotFound;
 </script>
 
-<svelte:component this={Page} />
+{#key location.hash}
+  <svelte:component this={Page} />
+{/key}
