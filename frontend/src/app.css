@@ -1,6 +1,3 @@
-/* Importar estilos de Leaflet */
-@import "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-
 /* Asegurar que toda la app ocupa la pantalla completa */
 html, body, #app {
   height: 100%;

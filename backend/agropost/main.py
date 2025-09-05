@@ -1,15 +1,16 @@
-# backend/agropost/main.py
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnect
 from datetime import datetime, timezone
 from pathlib import Path
-import asyncio, math, os
+from pydantic import BaseModel
+from typing import Optional, Set
+import asyncio, os
 
 app = FastAPI()
 
-# ---- Salud y versión (YA LOS TENÉS, conserva si están) ----
+# ---- Salud y versión ----
 START_TIME = datetime.now(timezone.utc)
 
 @app.get("/api/health", include_in_schema=False)
@@ -21,33 +22,89 @@ def api_health():
 def api_version():
     return {"version": "R1.0.0", "commit": os.environ.get("APP_COMMIT", "dev")}
 
-# ---- WebSocket mínimo y robusto (DROP-IN) ----
+
+# ---- In-memory state y endpoints de datos ----
+CLIENTS: Set[WebSocket] = set()
+LAST_POINT: Optional[dict] = None
+
+
+class Position(BaseModel):
+    lat: float
+    lon: float
+    ts: Optional[str] = None
+    fix_quality: Optional[int] = None
+    pdop: Optional[float] = None
+    sats: Optional[int] = None
+
+
+async def _broadcast_json(data: dict) -> int:
+    delivered = 0
+    dead: Set[WebSocket] = set()
+    for ws in list(CLIENTS):
+        try:
+            await ws.send_json(data)
+            delivered += 1
+        except Exception:
+            dead.add(ws)
+            try:
+                await ws.close(code=1011)
+            except Exception:
+                pass
+    for ws in dead:
+        try:
+            CLIENTS.remove(ws)
+        except KeyError:
+            pass
+    return delivered
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
+    CLIENTS.add(ws)
+    # Enviar último punto si existe
+    if LAST_POINT is not None:
+        try:
+            await ws.send_json(LAST_POINT)
+        except Exception:
+            pass
     try:
-        # Punto simulado: reemplazalo por tu stream real cuando quieras
-        t = 0
-        base_lat, base_lon = -34.6, -58.4
         while True:
-            lat = base_lat + 0.00002 * math.sin(t / 10)
-            lon = base_lon + 0.00002 * math.cos(t / 10)
-            msg = {
-                "ts": datetime.utcnow().isoformat() + "Z",
-                "lat": lat,
-                "lon": lon,
-                "fix_quality": 4
-            }
-            await ws.send_json(msg)
-            await asyncio.sleep(0.5)
-            t += 1
+            await asyncio.sleep(3600)
     except WebSocketDisconnect:
-        # Cliente cerró
-        return
+        pass
     except Exception as e:
-        # Si algo falla, cerramos limpio (evita 500 en handshake siguiente)
-        await ws.close(code=1011)
         print("[/ws ERROR]", repr(e))
+    finally:
+        try:
+            CLIENTS.remove(ws)
+        except KeyError:
+            pass
+
+
+@app.post("/api/pos")
+async def post_position(p: Position):
+    """Recibe posición por POST y la retransmite por WS a los clientes conectados."""
+    global LAST_POINT
+    msg = {
+        "ts": p.ts or (datetime.utcnow().isoformat() + "Z"),
+        "lat": p.lat,
+        "lon": p.lon,
+        "fix_quality": p.fix_quality,
+        "pdop": p.pdop,
+        "sats": p.sats,
+    }
+    LAST_POINT = msg
+    delivered = await _broadcast_json(msg)
+    return {"ok": True, "delivered": delivered}
+
+
+@app.get("/api/last")
+async def get_last():
+    if LAST_POINT is None:
+        return JSONResponse({"ok": False, "error": "no data"}, status_code=404)
+    return LAST_POINT
+
 
 # ---- (Opcional) logging del orden de rutas al arrancar ----
 @app.on_event("startup")
@@ -77,3 +134,4 @@ else:
             {"error": "frontend/dist no encontrado", "esperado": str(DIST_DIR)},
             status_code=500
         )
+

@@ -4,4 +4,17 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [svelte()],
+  server: {
+    proxy: {
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true,
+      },
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
 })

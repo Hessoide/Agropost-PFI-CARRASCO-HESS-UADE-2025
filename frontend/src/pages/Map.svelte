@@ -21,19 +21,22 @@
     return () => window.removeEventListener("hashchange", readParams);
   });
 
-  // fuerza remontar <Mapa/> cuando cambie cualquier parámetro o el hash
+  // Fuerza remontar <Mapa/> cuando cambian parámetros o el hash
   $: componentKey = JSON.stringify({ initLat, initLon, initZoom, useMock, hash: location.hash });
 </script>
 
-<div class="ui"><BackButton label="← Atrás" /></div>
+<div class="ui"><BackButton /></div>
 
 <div class="page">
   {#key componentKey}
-    <Mapa {initLat} {initLon} {initZoom} {useMock} />
+    <!-- Modo minimal solo cuando NO es simulación -->
+    <Mapa {initLat} {initLon} {initZoom} {useMock} minimal={!useMock} />
   {/key}
 </div>
 
 <style>
   .ui{ position:fixed; top:12px; left:12px; z-index:2000; }
-  .page{ position:relative; height:100vh; }
+  /* Forzar pantalla completa del mapa y evitar max-width del contenedor */
+  :global(#app){ max-width: none; margin: 0; padding: 0; width:100vw; }
+  .page{ position:fixed; inset:0; }
 </style>

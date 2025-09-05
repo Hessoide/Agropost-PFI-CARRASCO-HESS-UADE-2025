@@ -5,6 +5,7 @@
   import Config from "./pages/Config.svelte";
   import Registros from "./pages/Registros.svelte";
   import NotFound from "./pages/NotFound.svelte";
+  import Campo from "./pages/Campo.svelte";
 
   // Mapea rutas -> componente
   const routes = {
@@ -12,6 +13,7 @@
     "/map": MapPage,
     "/config": Config,
     "/registros": Registros,
+    "/campo": Campo,
   };
 
   let route = currentRoute();
