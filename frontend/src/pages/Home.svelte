@@ -2,18 +2,16 @@
   import { getConfig } from "../lib/config";
   const cfg = getConfig();
   const mapHref       = "#/map";           // usa centro por defecto de Config
-  const mapHrefMock   = "#/map?mock=1";    // arranca simulación
 </script>
 
 <main class="home">
   <section class="panel">
     <h1>AgroPost</h1>
     <nav class="menu">
-      <a class="btn" href={mapHref}>Mapa</a>
-      <a class="btn" href={mapHrefMock}>Mapa (simulación)</a>
       <a class="btn" href="#/campo">Campo (GeoJSON)</a>
-      <a class="btn" href="#/registros">Registros</a>
-      <a class="btn" href="#/config">Configuración</a>
+      <a class="btn" href="#/campo">cargar campo nuevo</a>
+      <a class="btn" href="#/campos">seleccionar campo</a>
+      <a class="btn" href="#/config">configuracion</a>
     </nav>
     <p class="hint">Centro por defecto: {cfg.defaultLat}, {cfg.defaultLon} (zoom {cfg.defaultZoom}). Cambialo en Configuración.</p>
   </section>

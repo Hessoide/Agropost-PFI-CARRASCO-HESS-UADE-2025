@@ -6,11 +6,19 @@
   import Registros from "./pages/Registros.svelte";
   import NotFound from "./pages/NotFound.svelte";
   import Campo from "./pages/Campo.svelte";
+  import CamposGuardados from "./pages/CamposGuardados.svelte";
+  import CampoMenu from "./pages/CampoMenu.svelte";
+  import CampoVer from "./pages/CampoVer.svelte";
+  import Maquinaria from "./pages/Maquinaria.svelte";
 
   // Mapea rutas -> componente
   const routes = {
     "/": Home,
     "/map": MapPage,
+    "/campos": CamposGuardados,
+    "/campo-menu": CampoMenu,
+    "/campo-ver": CampoVer,
+    "/maquinaria": Maquinaria,
     "/config": Config,
     "/registros": Registros,
     "/campo": Campo,

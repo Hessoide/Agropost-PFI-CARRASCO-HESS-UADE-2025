@@ -1,5 +1,5 @@
 param(
-  [string]$Host = "127.0.0.1",
+  [string]$ApiHost = "127.0.0.1",
   [int]$Port = 8000,
   [switch]$Check
 )
@@ -18,10 +18,10 @@ if (-not (Test-Path $py)) {
 & $py -m pip install -r (Join-Path $root 'requirements.txt')
 
 if ($Check) {
-  & $py (Join-Path $root 'sender.py') health --host $Host --port $Port
+  & $py (Join-Path $root 'sender.py') health --host $ApiHost --port $Port
 } else {
   Write-Host "Ejemplos:" -ForegroundColor Cyan
-  Write-Host "  python sender.py simulate --host $Host --port $Port --rate 2" -ForegroundColor DarkGray
-  Write-Host "  python sender.py geojson ..\frontend\public\geo\recorrido.geojson --host $Host --port $Port --rate 2" -ForegroundColor DarkGray
+  Write-Host "  python sender.py --host $ApiHost --port $Port simulate --rate 2" -ForegroundColor DarkGray
+  Write-Host "  python sender.py --host $ApiHost --port $Port geojson ..\frontend\public\geo\recorrido.geojson --rate 2" -ForegroundColor DarkGray
 }
 

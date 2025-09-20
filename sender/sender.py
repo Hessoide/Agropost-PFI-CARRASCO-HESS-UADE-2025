@@ -64,33 +64,70 @@ def cmd_geojson(args):
     host, port = args.host, args.port
     rate = float(args.rate)
     wait = 1.0 / rate if rate > 0 else 0
+    step_m = float(getattr(args, "step", 0.3))  # metros entre puntos interpolados
 
     path = Path(args.file)
-    data = json.loads(path.read_text(encoding="utf-8"))
-    coords = list(extract_coords(data))
-    if not coords:
+    # Admitir archivos con BOM (guardados como UTF-8 con BOM)
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    base = list(extract_coords(data))
+    if not base:
         raise SystemExit("GeoJSON sin coordenadas (LineString/MultiLineString/Points)")
 
-    print(f"Reproduciendo {len(coords)} puntos desde {path} hacia {host}:{port} (loop={args.loop})")
-    idx = 0
-    while True:
-        try:
-            lat, lon = coords[idx]
-            resp = post_pos(host, port, lat, lon, fix=args.fix, pdop=args.pdop, sats=args.sats)
-            print(f"[{idx+1}/{len(coords)}] ->", lat, lon, resp.get("delivered"))
-            idx += 1
-            if idx >= len(coords):
-                if args.loop:
-                    idx = 0
-                else:
-                    break
-            if wait: time.sleep(wait)
-        except KeyboardInterrupt:
-            print("bye")
+    def dist_m(p0, p1) -> float:
+        lat0, lon0 = p0
+        lat1, lon1 = p1
+        dlat = (lat1 - lat0) * 111_320.0
+        # usar lat media para escalado en lon
+        latm = 0.5 * (lat0 + lat1)
+        dlon = (lon1 - lon0) * 111_320.0 * max(0.1, math.cos(math.radians(latm)))
+        return math.hypot(dlat, dlon)
+
+    def interpolate_segment(p0, p1, step: float):
+        """Genera puntos entre p0->p1 separados ~step metros (excluye p0, incluye p1)."""
+        if step <= 0:
+            yield p1
             return
-        except Exception as e:
-            print("ERR:", e)
-            time.sleep(1.0)
+        d = dist_m(p0, p1)
+        if d <= step:
+            yield p1
+            return
+        n = max(1, int(round(d / step)))
+        for i in range(1, n + 1):
+            t = i / n
+            lat = p0[0] + (p1[0] - p0[0]) * t
+            lon = p0[1] + (p1[1] - p0[1]) * t
+            yield (lat, lon)
+
+    def iter_once(coords):
+        if not coords:
+            return
+        prev = coords[0]
+        yield prev
+        for cur in coords[1:]:
+            for p in interpolate_segment(prev, cur, step_m):
+                yield p
+            prev = cur
+
+    print(
+        f"Reproduciendo GeoJSON desde {path} hacia {host}:{port} (loop={args.loop}, step={step_m}m, base_points={len(base)})"
+    )
+    sent = 0
+    try:
+        while True:
+            for (lat, lon) in iter_once(base):
+                resp = post_pos(host, port, lat, lon, fix=args.fix, pdop=args.pdop, sats=args.sats)
+                sent += 1
+                print(f"[{sent}] ->", lat, lon, resp.get("delivered"))
+                if wait:
+                    time.sleep(wait)
+            if not args.loop:
+                break
+    except KeyboardInterrupt:
+        print("bye")
+        return
+    except Exception as e:
+        print("ERR:", e)
+        time.sleep(1.0)
 
 
 def extract_coords(geo):
@@ -139,6 +176,7 @@ def main():
     p_gj = sub.add_parser("geojson", help="Reproducir GeoJSON")
     p_gj.add_argument("file", help="ruta a GeoJSON con LineString/Points")
     p_gj.add_argument("--rate", type=float, default=2.0, help="puntos por segundo")
+    p_gj.add_argument("--step", type=float, default=0.3, help="interpolar cada N metros (0=desactivado)")
     p_gj.add_argument("--loop", action="store_true")
     p_gj.set_defaults(func=cmd_geojson)
 
@@ -151,4 +189,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -28,9 +28,11 @@ Desarrollar un sistema basado en GNSS y RTK que permita obtener ubicación preci
 - http://localhost:8000
 
 ## Como correr el proyecto:
-- ./start.ps1
-- cd sender
--  python sender.py --host 192.168.56.1 --port 8000 geojson "..\frontend\public\geo\recorrido.geojson" --rate 2 --loop
+
+- 
+- python .\sender\sender.py --host 192.168.56.1 --port 8000 geojson ".\frontend\public\geo\recorrido.geojson" --rate 2 --loop
+
+192.168.56.1
 
 - http://localhost:8000
 
@@ -42,7 +44,7 @@ Backend y frontend con proxies de desarrollo ya configurados en Vite:
   - `cd backend`
   - `uvicorn agropost.main:app --host 0.0.0.0 --port 8000 --reload`
 - Terminal 2:
-  - `cd frontend`
+  - `cd frontend`92.168.56.1
   - `npm run dev`
 - Abrir `http://localhost:5173` (Vite proxy redirige `/api` y `/ws` al backend)
 
@@ -85,6 +87,16 @@ Opción 1 (PowerShell):
 Opciones:
 - `./start.ps1 -Reload` inicia backend con autoreload.
 - `./start.ps1 -SkipFrontend` salta el build del frontend.
+
+Opción Linux/Raspberry:
+
+```
+chmod +x ./start.sh
+./start.sh              # build + backend
+# variantes:
+./start.sh --reload     # autoreload para desarrollo
+./start.sh --skip-frontend   # salta build si ya existe frontend/dist
+```
 
 Opción 2 (CMD):
 

@@ -17,8 +17,8 @@ Esto crea un venv, instala dependencias y ejecuta un check de salud.
 Uso (CLI)
 ```
 cd sender
-python sender.py simulate --host 192.168.1.10 --port 8000 --rate 2 --meters 0.5
-python sender.py geojson campo.geojson --host 192.168.1.10 --port 8000 --rate 2 --loop
+python sender.py --host 192.168.1.10 --port 8000 simulate --rate 2 --meters 0.5
+python sender.py --host 192.168.1.10 --port 8000 geojson campo.geojson --rate 2 --loop
 ```
 
 Comandos
@@ -47,4 +47,3 @@ Notas
 - Asegúrate de que el backend esté accesible desde la red (ver firewall y que esté escuchando en 0.0.0.0).
 - En la UI usa la pantalla Campo (`#/campo`).
 - Si no ves el recorrido en Campo, asegurate de tener el mapa con `noTiles=true` y WS habilitado (versión actual lo permite).
-

@@ -1,0 +1,24 @@
+movil
+
+-cd ~/Agropost-PFI-CARRASCO-HESS-UADE-2025
+-python3 -m venv .venv && source .venv/bin/activate
+-pip install --upgrade pip && pip install -r requirements.txt
+-cd backend 
+-hostname -I
+-uvicorn agropost.main:app --host 0.0.0.0 --port 8000
+abrir localhost:8000
+
+192.168.56.1
+
+base
+
+-cd ~/Agropost-PFI-CARRASCO-HESS-UADE-2025
+-python3 -m venv .venv && source .venv/bin/activate
+-pip install -r sender/requirements.txt
+-python sender/sender.py --host "IP-MOVIL" --port 8000 geojson frontend/public/geo/recorrido.geojson --rate 2 --loop
+
+-python sender/sender.py --host 172.17.254.12 --port 8000 geojson frontend/public/geo/recorrido.geojson --rate 2 --loop
+
+poner botones de acercar y alejar, un recorrido mas interesante, otra forma de campo?
+
+-python sender/sender.py --host 172.17.254.12 --port 8000 geojson frontend/public/geo/recorrido.geojson --rate 2 --loop

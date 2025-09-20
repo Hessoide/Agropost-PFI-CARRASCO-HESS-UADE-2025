@@ -1,0 +1,8 @@
+{
+  "nombre": "campo1",
+  "maquinaria_actual": null,
+  "maquinarias": [
+    { "nombre": "cosechadora", "ancho": 8 },
+    { "nombre": "arado", "ancho": 5 }
+  ]
+}
