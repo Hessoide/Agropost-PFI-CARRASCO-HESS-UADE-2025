@@ -4,6 +4,8 @@
   import Mapa from "../Mapa.svelte";
 
   let initLat = null, initLon = null, initZoom = 18, useMock = false;
+  let geoUrl = null;
+  let campoId = null;
 
   function readParams() {
     const qs = new URLSearchParams((location.hash.split("?")[1] || ""));
@@ -13,6 +15,10 @@
     initLon  = Number.isFinite(lon) ? lon : null;
     initZoom = qs.get("z") ? parseFloat(qs.get("z")) : 18;
     useMock  = qs.get("mock") === "1";
+    const geo = qs.get("geo");
+    const campo = qs.get("campo");
+    geoUrl = (geo && geo.startsWith('/')) ? geo : null;
+    campoId = campo || null;
   }
 
   onMount(() => {
@@ -22,7 +28,7 @@
   });
 
   // Fuerza remontar <Mapa/> cuando cambian parámetros o el hash
-  $: componentKey = JSON.stringify({ initLat, initLon, initZoom, useMock, hash: location.hash });
+  $: componentKey = JSON.stringify({ initLat, initLon, initZoom, useMock, geoUrl, campoId });
 </script>
 
 <div class="ui"><BackButton /></div>
@@ -30,7 +36,7 @@
 <div class="page">
   {#key componentKey}
     <!-- Modo minimal solo cuando NO es simulación -->
-    <Mapa {initLat} {initLon} {initZoom} {useMock} minimal={!useMock} />
+    <Mapa {initLat} {initLon} {initZoom} {useMock} {geoUrl} minimal={!useMock} />
   {/key}
 </div>
 

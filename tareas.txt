@@ -1,0 +1,30 @@
+ACA VAN TODAS LAS COSAS QUE HAY QUE HACER
+
+agregar largo de la maquinaria
+agregar una linea o cuadrado/rectangulo
+la linea que va "pintando" el area tiene que poder ponerse a una x distancia del centro, hacia delante o atras
+hacer que el area recorrida sea un poligono pintado?
+si puedo poner todos los puntos al mismo tiempo los pongo? o lo ya recorrido se pone de forma simplificada?
+tengo que poder borrar campos/areas
+poder crear maquinarias y poder borrarlas/editarlas
+que me marque cuando se solapa el recorrido, o se pasa y se dejo espacio
+que me marque en que area estoy trabajando, porcentaje trabajado?
+grabar recorridos???
+
+objetivo minimo 
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+TESIS CLASE 11
+modelo economico desarrollado, a partir del modelo de negocio, (bisness model camvas del modelo de negocio?)
+presentacion preliminar 20 min, puede que no sea el sabado q es o el siguente..., solo afecta al documento
