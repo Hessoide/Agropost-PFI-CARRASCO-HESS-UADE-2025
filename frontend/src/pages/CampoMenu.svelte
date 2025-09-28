@@ -9,6 +9,8 @@
   let routeName = "";
   let creating = false;
   let createError = null;
+  let deleting = false;
+  let deleteError = null;
 
   let recorridos = [];
   let listLoading = false;
@@ -20,6 +22,8 @@
     routeName = "";
     creating = false;
     createError = null;
+    deleting = false;
+    deleteError = null;
     recorridos = [];
     listLoading = false;
     listLoaded = false;
@@ -140,9 +144,35 @@
       if (id === campo) creating = false;
     }
   }
+
+  async function handleDeleteCampo() {
+    if (!id || deleting) return;
+    const campoActual = id;
+    if (!window.confirm("Borrar el campo \"" + campoActual + "\" y todos sus archivos? Esta accion no se puede deshacer.")) return;
+    deleting = true;
+    deleteError = null;
+    try {
+      const res = await fetch(`/api/campos/${encodeURIComponent(campoActual)}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(await parseErrorResponse(res));
+      }
+      if (id === campoActual) {
+        location.hash = "#/campos";
+      }
+    } catch (e) {
+      if (id === campoActual) {
+        deleteError = e instanceof Error ? e.message : String(e);
+      }
+    } finally {
+      if (id === campoActual) {
+        deleting = false;
+      }
+    }
+  }
+
 </script>
 
-<div class="ui"><BackButton /></div>
+<div class="ui"><BackButton forceFallback={true} fallback="#/" /></div>
 
 <main class="menu-campo">
   <section class="panel">
@@ -156,7 +186,18 @@
         <button class="btn" type="button" on:click={handleStartClick}>iniciar recorrido</button>
         <button class="btn" type="button" on:click={handleContinueClick}>continuar recorrido</button>
         <a class="btn" href={`#/campo-ver?id=${encodeURIComponent(id)}`}>ver campo</a>
+        <button class="btn danger" type="button" on:click={handleDeleteCampo} disabled={deleting}>
+          {#if deleting}
+            borrando...
+          {:else}
+            borrar campo
+          {/if}
+        </button>
       </nav>
+
+      {#if deleteError}
+        <p class="err">{deleteError}</p>
+      {/if}
 
       {#if mode === "start"}
         <section class="subpanel">
@@ -215,6 +256,8 @@
   .panel{ display:grid; gap:16px; width:100%; max-width:540px; }
   .acciones{ display:flex; flex-wrap:wrap; gap:12px; }
   .btn{ padding:10px 14px; border:1px solid #aaa; border-radius:6px; text-decoration:none; background:#fff; color:#111; display:inline-flex; align-items:center; gap:6px; cursor:pointer; transition:background .15s ease; }
+  .btn.danger{ border-color:#c62828; color:#b71c1c; }
+  .btn.danger:not(:disabled){ background:#fdecea; }
   .btn:hover:not(:disabled){ background:#f4f4f4; }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
   .btn.ghost{ background:transparent; }

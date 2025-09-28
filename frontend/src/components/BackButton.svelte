@@ -1,9 +1,15 @@
-<!-- frontend/src/components/BackButton.svelte -->
-<script>
+﻿<script>
   export let label = "← Atrás";
+  export let fallback = "#/";
+  export let forceFallback = false;
+
   function goBack() {
+    if (forceFallback) {
+      location.hash = fallback;
+      return;
+    }
     if (history.length > 1) history.back();
-    else location.hash = "#/"; // fallback a Home si no hay historial
+    else location.hash = fallback;
   }
 </script>
 

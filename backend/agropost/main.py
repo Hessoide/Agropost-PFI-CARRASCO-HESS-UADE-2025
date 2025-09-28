@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional, Set
-import asyncio, os, json, re
+import asyncio, os, json, re, shutil
 from urllib.parse import quote
 
 app = FastAPI()
@@ -14,6 +14,13 @@ app = FastAPI()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CAMPOS_ROOT = (REPO_ROOT / "frontend" / "public" / "campos guardados").resolve()
 CAMPOS_ROOT.mkdir(parents=True, exist_ok=True)
+INDEX_PATH = (CAMPOS_ROOT / "index.json").resolve()
+
+app.mount("/campos guardados", StaticFiles(directory=str(CAMPOS_ROOT), html=False), name="campos-guardados")
+
+if not INDEX_PATH.exists():
+    INDEX_PATH.write_text(json.dumps({'campos': []}, ensure_ascii=False, indent=2), encoding='utf-8')
+
 
 # ---- Salud y versión ----
 START_TIME = datetime.now(timezone.utc)
@@ -116,6 +123,26 @@ async def get_last():
 class RecorridoCreate(BaseModel):
     nombre: str
 
+# ---- Helpers comunes de campos ----
+
+def _load_campos_index():
+    if not INDEX_PATH.exists():
+        return []
+    try:
+        data = json.loads(INDEX_PATH.read_text(encoding='utf-8'))
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, dict):
+        campos = data.get('campos')
+    else:
+        campos = data
+    return [str(c) for c in campos] if isinstance(campos, list) else []
+
+def _save_campos_index(campos):
+    INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with INDEX_PATH.open('w', encoding='utf-8') as fh:
+        json.dump({'campos': campos}, fh, ensure_ascii=False, indent=2)
+
 # Helpers para gestionar archivos de recorridos por campo.
 def _resolve_campo_dir(campo_id: str) -> Path:
     cid = (campo_id or '').strip()
@@ -202,6 +229,54 @@ async def crear_recorrido(campo_id: str, data: RecorridoCreate):
     info = _serialize_recorrido(campo_id, filepath)
     info['nombre'] = data.nombre.strip()
     return {'ok': True, 'recorrido': info}
+
+class CampoCreate(BaseModel):
+    nombre: str
+
+@app.post('/api/campos')
+async def crear_campo(data: CampoCreate):
+    nombre = (data.nombre or '').strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail='nombre requerido')
+
+    sanitized = re.sub(r'[\\/:*?"<>|]', '-', nombre).strip()
+    if not sanitized:
+        raise HTTPException(status_code=400, detail='nombre invalido')
+
+    campo_dir = (CAMPOS_ROOT / sanitized).resolve()
+    try:
+        campo_dir.relative_to(CAMPOS_ROOT)
+    except ValueError:
+        raise HTTPException(status_code=400, detail='nombre invalido')
+
+    if campo_dir.exists():
+        raise HTTPException(status_code=409, detail='el campo ya existe')
+
+    campo_dir.mkdir(parents=True, exist_ok=False)
+    (campo_dir / 'recorridos').mkdir(parents=True, exist_ok=True)
+
+    default_area = {'type': 'FeatureCollection', 'features': []}
+    default_datos = {'nombre': nombre, 'maquinaria_actual': None, 'maquinarias': []}
+
+    (campo_dir / 'area.geojson').write_text(json.dumps(default_area, ensure_ascii=False, indent=2), encoding='utf-8')
+    (campo_dir / 'datos.json').write_text(json.dumps(default_datos, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    campos = _load_campos_index()
+    if sanitized not in campos:
+        campos.append(sanitized)
+        _save_campos_index(campos)
+
+    return {'ok': True, 'campo': {'id': sanitized, 'nombre': nombre}}
+
+@app.delete('/api/campos/{campo_id}')
+async def borrar_campo(campo_id: str):
+    campo_dir = _resolve_campo_dir(campo_id)
+    shutil.rmtree(campo_dir)
+
+    campos = [c for c in _load_campos_index() if c != campo_id]
+    _save_campos_index(campos)
+
+    return {'ok': True}
 
 # ---- (Opcional) logging del orden de rutas al arrancar ----
 @app.on_event("startup")

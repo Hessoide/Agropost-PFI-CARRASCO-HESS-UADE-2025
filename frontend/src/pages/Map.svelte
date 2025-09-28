@@ -36,7 +36,7 @@
 <div class="page">
   {#key componentKey}
     <!-- Modo minimal solo cuando NO es simulación -->
-    <Mapa {initLat} {initLon} {initZoom} {useMock} {geoUrl} minimal={!useMock} />
+    <Mapa {initLat} {initLon} {initZoom} {useMock} {geoUrl} {campoId} minimal={false} />
   {/key}
 </div>
 

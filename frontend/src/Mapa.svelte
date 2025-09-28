@@ -15,6 +15,8 @@
   export let showScale = false; // muestra cÃ­rculo de escala (radio)
   export let showGrid = false;  // muestra cuadrÃ­cula tipo ajedrez basada en la escala
 
+  export let campoId = null;
+
   const cfg = getConfig();
   const WS_URL = (cfg.wsUrl && cfg.wsUrl.trim()) || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 
@@ -34,7 +36,165 @@
   let lastSats = null;
   let scalePx = 0;                   // radio en pÃ­xeles
   let scaleMeters = 0;               // longitud de línea en metros
-  let gridOriginLL = null;           // origen de cuadrÃ­cula (centro del polÃ­gono si hay)
+  let gridOriginLL = null;
+
+  let coverageLayer;                 // poligono de cobertura dinamico
+  let maquinariaActual = null;
+  let maquinariaAncho = null;
+  let campoDatosVersion = 0;
+  let lastCampoIdLoaded = undefined;
+  let totalAreaM2 = 0;
+
+  const CAMPOS_BASE = "/campos%20guardados";
+
+  function datosLsKey(id) {
+    return `campo:${id}:datos`;
+  }
+
+  function mergeCampoDatos(id, base, override) {
+    const b = base || {};
+    const o = override || {};
+    const maquinariaAct =
+      (o.maquinaria_actual ?? b.maquinaria_actual ?? o["maquinaria actua"] ?? b["maquinaria actua"]) ?? null;
+    const maqs = Array.isArray(o.maquinarias)
+      ? o.maquinarias
+      : (Array.isArray(b.maquinarias) ? b.maquinarias : []);
+    return {
+      nombre: o.nombre ?? b.nombre ?? id ?? "(sin nombre)",
+      maquinaria_actual: maquinariaAct,
+      maquinarias: maqs
+    };
+  }
+
+  function clearCoverage(resetArea = false) {
+    if (coverageLayer) {
+      try { coverageLayer.clearLayers(); } catch {}
+      try { coverageLayer.remove(); } catch {}
+    }
+    coverageLayer = null;
+    totalAreaM2 = 0;
+    if (resetArea) areaHa = '0.000';
+  }
+
+  function updateFallbackArea() {
+    if (coords.length >= 2) {
+      try {
+        const ls = turf.lineString(coords);
+        const buff = turf.buffer(ls, 1.0, { units: 'meters' });
+        areaHa = (turf.area(buff) / 10000).toFixed(3);
+      } catch {}
+    } else {
+      areaHa = '0.000';
+    }
+  }
+
+  function addCoverageSegment(prevCoord, currCoord) {
+    if (!map || minimal) return;
+    if (!maquinariaAncho || maquinariaAncho <= 0) return;
+
+    const prevPt = turf.point(prevCoord);
+    const currPt = turf.point(currCoord);
+    const segmentMeters = turf.distance(prevPt, currPt, { units: 'meters' });
+    if (!Number.isFinite(segmentMeters) || segmentMeters <= 0) return;
+
+    const bearing = turf.rhumbBearing(prevPt, currPt);
+    const halfWidth = maquinariaAncho / 2;
+
+    const prevLeft = turf.rhumbDestination(prevPt, halfWidth, bearing - 90, { units: 'meters' }).geometry.coordinates;
+    const prevRight = turf.rhumbDestination(prevPt, halfWidth, bearing + 90, { units: 'meters' }).geometry.coordinates;
+    const currLeft = turf.rhumbDestination(currPt, halfWidth, bearing - 90, { units: 'meters' }).geometry.coordinates;
+    const currRight = turf.rhumbDestination(currPt, halfWidth, bearing + 90, { units: 'meters' }).geometry.coordinates;
+
+    if (!coverageLayer) coverageLayer = L.layerGroup().addTo(map);
+
+    L.polygon(
+      [
+        [prevLeft[1], prevLeft[0]],
+        [currLeft[1], currLeft[0]],
+        [currRight[1], currRight[0]],
+        [prevRight[1], prevRight[0]]
+      ],
+      {
+        color: '#2e7d32',
+        weight: 0,
+        opacity: 0,
+        fillColor: '#66bb6a',
+        fillOpacity: 0.45
+      }
+    ).addTo(coverageLayer);
+
+    totalAreaM2 += maquinariaAncho * segmentMeters;
+    areaHa = (totalAreaM2 / 10000).toFixed(3);
+  }
+
+  function rebuildCoverageFromCoords() {
+    clearCoverage(true);
+    if (!map || minimal) return;
+
+    if (!maquinariaAncho || maquinariaAncho <= 0) {
+      updateFallbackArea();
+      return;
+    }
+    if (coords.length < 2) {
+      areaHa = '0.000';
+      return;
+    }
+    coverageLayer = L.layerGroup().addTo(map);
+    totalAreaM2 = 0;
+    for (let i = 1; i < coords.length; i += 1) {
+      addCoverageSegment(coords[i - 1], coords[i]);
+    }
+  }
+
+
+  async function loadCampoConfig(id) {
+    const version = ++campoDatosVersion;
+    if (!id) {
+      maquinariaActual = null;
+      maquinariaAncho = null;
+      clearCoverage(true);
+      updateFallbackArea();
+      return;
+    }
+    try {
+      const encoded = encodeURIComponent(id);
+      const url = `${CAMPOS_BASE}/${encoded}/datos.json`;
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const base = await res.json();
+      let override = null;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const raw = localStorage.getItem(datosLsKey(id));
+          override = raw ? JSON.parse(raw) : null;
+        }
+      } catch {
+        override = null;
+      }
+      if (version !== campoDatosVersion) return;
+      const datos = mergeCampoDatos(id, base, override);
+      maquinariaActual = datos.maquinaria_actual ?? null;
+      const selected = (datos.maquinarias || []).find(m => (m?.nombre ?? null) === maquinariaActual);
+      const widthValue = selected?.ancho;
+      const widthNumber = Number(widthValue);
+      maquinariaAncho = Number.isFinite(widthNumber) && widthNumber > 0 ? widthNumber : null;
+      if (maquinariaAncho && maquinariaAncho > 0) {
+        rebuildCoverageFromCoords();
+      } else {
+        clearCoverage(true);
+        updateFallbackArea();
+      }
+    } catch (e) {
+      if (version !== campoDatosVersion) return;
+      console.warn('[MAP] No se pudo cargar maquinaria del campo', e);
+      maquinariaActual = null;
+      maquinariaAncho = null;
+      clearCoverage(true);
+      updateFallbackArea();
+    }
+  }
+
+           // origen de cuadrÃ­cula (centro del polÃ­gono si hay)
 
   function addPoint(lat, lon, extra = {}) {
     if (!map || minimal) return;
@@ -43,11 +203,22 @@
     const pdop = extra.pdop ?? null;
     const sats = extra.sats ?? null;
 
+    const prevCoord = coords.length ? coords[coords.length - 1] : null;
+    const newCoord = [lon, lat];
+
     points.push({ ts, lat, lon, fix, pdop, sats });
     puntos = points.length;
     lastPdop = pdop;
     lastSats = sats;
-    coords.push([lon, lat]);
+    coords.push(newCoord);
+
+    if (maquinariaAncho && maquinariaAncho > 0 && prevCoord) {
+      addCoverageSegment(prevCoord, newCoord);
+    } else if (!maquinariaAncho || maquinariaAncho <= 0) {
+      if (coords.length >= 2 && coords.length % 5 === 0) {
+        updateFallbackArea();
+      }
+    }
 
     const ll = L.latLng(lat, lon);
     lineLayer.addLatLng(ll);
@@ -57,13 +228,13 @@
     if (coords.length === 1 && (initLat === null || initLon === null)) {
       map.setView(ll, 18);
     }
-
-    if (coords.length % 5 === 0) {
-      const ls = turf.lineString(coords);
-      const buff = turf.buffer(ls, 1.0, { units: 'meters' });
-      areaHa = (turf.area(buff) / 10000).toFixed(3);
-    }
   }
+
+  $: if (campoId !== lastCampoIdLoaded) {
+    lastCampoIdLoaded = campoId;
+    loadCampoConfig(campoId);
+  }
+
 
   function connectWS() {
     if (minimal || useMock) return; // en mock no conectamos ni simulamos
@@ -110,7 +281,7 @@
       L.tileLayer(cartoUrl, { attribution: cartoAttrib, subdomains: 'abcd', maxNativeZoom: 20, maxZoom: 28, detectRetina: true }).addTo(map);
     }
     if (!minimal) {
-      lineLayer = L.polyline([], { weight: 4 }).addTo(map);
+      lineLayer = L.polyline([], { weight: 2, color: '#ff6a00', opacity: 0.6 }).addTo(map);
     }
 
     // centro inicial
@@ -152,6 +323,8 @@
       }
     }
 
+    rebuildCoverageFromCoords();
+
     await ensureSize();
     try { window.addEventListener('resize', ensureSize); } catch {}
 
@@ -171,6 +344,7 @@
 
   onDestroy(() => {
     try { ws && ws.close(); } catch {}
+    try { clearCoverage(); } catch {}
     try { window.removeEventListener('resize', ensureSize); } catch {}
     try { map && map.off('move', scheduleRaf); } catch {}
     try { map && map.off('zoom', scheduleRaf); } catch {}
@@ -400,7 +574,9 @@
       <div>Fuente: {fuente}</div>
       <div>Fix: {fixText}</div>
       <div>Puntos: {puntos}</div>
-      <div>Ãrea: {areaHa} ha</div>
+      <div>Area: {areaHa} ha</div>
+      <div>Maquinaria: {maquinariaActual ?? "ninguna"}</div>
+      <div>Ancho activo: {maquinariaAncho ? `${maquinariaAncho} m` : "sin dato"}</div>
       {#if lastPdop != null}
         <div>PDOP: {lastPdop}</div>
       {/if}
@@ -422,7 +598,7 @@
 <style>
   .wrap { position: relative; width: 100%; height: 100%; }
   .map  { position: absolute; inset: 0; }
-  .hud  { position:absolute; top:10px; left:10px; background:#0009; color:#fff; padding:8px; border-radius:8px; display:flex; gap:10px; z-index:1500;}
+  .hud  { position:absolute; top:10px; left:72px; background:#0009; color:#fff; padding:8px 12px; border-radius:8px; display:flex; gap:10px; z-index:1500; }
   .btn  { padding:.6rem .9rem; border:1px solid #ccc; border-radius:.5rem; background:#fff; color:#111; cursor:pointer; }
 
   .grid { position:absolute; inset:0; pointer-events:none; z-index:900; }

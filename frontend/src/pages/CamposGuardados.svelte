@@ -10,16 +10,17 @@
 
   async function loadCampos() {
     const idxUrl = `${basePath}/index.json`;
-    const idxRes = await fetch(idxUrl);
+    const idxRes = await fetch(idxUrl, { cache: "no-cache" });
     if (!idxRes.ok) throw new Error(`No se pudo leer ${idxUrl}`);
     const idx = await idxRes.json();
     const ids = Array.isArray(idx) ? idx : (Array.isArray(idx.campos) ? idx.campos : []);
     const list = [];
     for (const id of ids) {
       try {
-        const datosUrl = `${basePath}/${id}/datos.json`;
-        const areaUrl  = `${basePath}/${id}/area.geojson`;
-        const res = await fetch(datosUrl);
+        const encodedId = encodeURIComponent(id);
+        const datosUrl = `${basePath}/${encodedId}/datos.json`;
+        const areaUrl  = `${basePath}/${encodedId}/area.geojson`;
+        const res = await fetch(datosUrl, { cache: "no-cache" });
         if (!res.ok) throw new Error(`No se pudo leer ${datosUrl}`);
         const datos = await res.json();
         list.push({ id, nombre: datos.nombre ?? id, datosUrl, areaUrl });
