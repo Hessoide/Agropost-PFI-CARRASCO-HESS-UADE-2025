@@ -43,9 +43,17 @@
   let maquinariaAncho = null;
   let campoDatosVersion = 0;
   let lastCampoIdLoaded = undefined;
-  let totalAreaM2 = 0;
-
   const CAMPOS_BASE = "/campos%20guardados";
+  const SMOOTH_MIN_POINTS = 3;
+  const SMOOTH_RESOLUTION = 5000;
+
+  let currentLineCoords = [];
+  let currentLineFeature = null;
+  let currentCoverageFeature = null;
+
+
+
+
 
   function datosLsKey(id) {
     return `campo:${id}:datos`;
@@ -68,92 +76,129 @@
 
   function clearCoverage(resetArea = false) {
     if (coverageLayer) {
-      try { coverageLayer.clearLayers(); } catch {}
       try { coverageLayer.remove(); } catch {}
     }
     coverageLayer = null;
-    totalAreaM2 = 0;
+    currentCoverageFeature = null;
     if (resetArea) areaHa = '0.000';
   }
 
   function updateFallbackArea() {
     if (coords.length >= 2) {
       try {
-        const ls = turf.lineString(coords);
-        const buff = turf.buffer(ls, 1.0, { units: 'meters' });
+        const line = turf.lineString(getSmoothedCoords(coords));
+        const buff = turf.buffer(line, 1.0, { units: 'meters', steps: 16, endCapStyle: 'round', joinStyle: 'round' });
         areaHa = (turf.area(buff) / 10000).toFixed(3);
-      } catch {}
+      } catch {
+        areaHa = '0.000';
+      }
     } else {
       areaHa = '0.000';
     }
   }
 
-  function addCoverageSegment(prevCoord, currCoord) {
-    if (!map || minimal) return;
-    if (!maquinariaAncho || maquinariaAncho <= 0) return;
-
-    const prevPt = turf.point(prevCoord);
-    const currPt = turf.point(currCoord);
-    const segmentMeters = turf.distance(prevPt, currPt, { units: 'meters' });
-    if (!Number.isFinite(segmentMeters) || segmentMeters <= 0) return;
-
-    const bearing = turf.rhumbBearing(prevPt, currPt);
-    const halfWidth = maquinariaAncho / 2;
-
-    const prevLeft = turf.rhumbDestination(prevPt, halfWidth, bearing - 90, { units: 'meters' }).geometry.coordinates;
-    const prevRight = turf.rhumbDestination(prevPt, halfWidth, bearing + 90, { units: 'meters' }).geometry.coordinates;
-    const currLeft = turf.rhumbDestination(currPt, halfWidth, bearing - 90, { units: 'meters' }).geometry.coordinates;
-    const currRight = turf.rhumbDestination(currPt, halfWidth, bearing + 90, { units: 'meters' }).geometry.coordinates;
-
-    if (!coverageLayer) coverageLayer = L.layerGroup().addTo(map);
-
-    L.polygon(
-      [
-        [prevLeft[1], prevLeft[0]],
-        [currLeft[1], currLeft[0]],
-        [currRight[1], currRight[0]],
-        [prevRight[1], prevRight[0]]
-      ],
-      {
-        color: '#2e7d32',
-        weight: 0,
-        opacity: 0,
-        fillColor: '#66bb6a',
-        fillOpacity: 0.45
-      }
-    ).addTo(coverageLayer);
-
-    totalAreaM2 += maquinariaAncho * segmentMeters;
-    areaHa = (totalAreaM2 / 10000).toFixed(3);
+  function getSmoothedCoords(source) {
+    if (!Array.isArray(source) || source.length < SMOOTH_MIN_POINTS) {
+      return Array.isArray(source) ? source.slice() : [];
+    }
+    try {
+      const line = turf.lineString(source);
+      const smooth = turf.bezierSpline(line, { resolution: SMOOTH_RESOLUTION, sharpness: 0.85 });
+      const coords = smooth?.geometry?.coordinates;
+      if (Array.isArray(coords) && coords.length) return coords;
+    } catch (e) {
+      console.warn('[MAP] smoothing error', e);
+    }
+    return source.slice();
   }
 
-  function rebuildCoverageFromCoords() {
-    clearCoverage(true);
-    if (!map || minimal) return;
+  function updateRouteLine(lineCoords) {
+    currentLineCoords = Array.isArray(lineCoords) ? lineCoords.map(([lon, lat]) => [lon, lat]) : [];
+    if (lineLayer) {
+      const latlngs = currentLineCoords.map(([lon, lat]) => [lat, lon]);
+      lineLayer.setLatLngs(latlngs);
+    }
+    try {
+      currentLineFeature = currentLineCoords.length >= 2 ? turf.lineString(currentLineCoords) : null;
+    } catch (e) {
+      currentLineFeature = null;
+    }
+  }
 
-    if (!maquinariaAncho || maquinariaAncho <= 0) {
+  function updateCoverageFromCoords({ forceReset = false } = {}) {
+    if (!map || minimal) return;
+    if (forceReset) clearCoverage(true);
+
+    if (!coords.length) {
+      clearCoverage(true);
+      return;
+    }
+
+    const hasWidth = maquinariaAncho && maquinariaAncho > 0;
+    const smoothed = getSmoothedCoords(coords);
+    currentCoverageFeature = null;
+    updateRouteLine(smoothed);
+
+    if (!hasWidth || smoothed.length < 2) {
+      clearCoverage(false);
       updateFallbackArea();
       return;
     }
-    if (coords.length < 2) {
-      areaHa = '0.000';
-      return;
-    }
-    coverageLayer = L.layerGroup().addTo(map);
-    totalAreaM2 = 0;
-    for (let i = 1; i < coords.length; i += 1) {
-      addCoverageSegment(coords[i - 1], coords[i]);
+
+    try {
+      const line = turf.lineString(smoothed);
+      const buff = turf.buffer(line, maquinariaAncho / 2, {
+        units: 'meters',
+        steps: 32,
+        endCapStyle: 'round',
+        joinStyle: 'round'
+      });
+      if (!buff || !buff.geometry) {
+        clearCoverage(false);
+        return;
+      }
+      areaHa = (turf.area(buff) / 10000).toFixed(3);
+      if (coverageLayer) {
+        coverageLayer.clearLayers();
+      currentCoverageFeature = buff;
+        coverageLayer.addData(buff);
+      } else {
+      currentCoverageFeature = buff;
+        coverageLayer = L.geoJSON(buff, {
+          style: () => ({ color: '#2e7d32', weight: 1, opacity: 0.75, fillColor: '#66bb6a', fillOpacity: 0.4 })
+        }).addTo(map);
+      }
+    } catch (e) {
+      console.warn('[MAP] coverage buffer error', e);
     }
   }
 
+
+  function cloneFeature(feature) {
+    return feature ? JSON.parse(JSON.stringify(feature)) : null;
+  }
+
+  export function getCurrentSnapshot() {
+    return {
+      line: cloneFeature(currentLineFeature),
+      coverage: cloneFeature(currentCoverageFeature),
+      rawLine: coords.map(([lon, lat]) => [lon, lat]),
+      areaHa: parseFloat(areaHa) || 0,
+      maquinaria: maquinariaActual,
+      maquinariaAncho: maquinariaAncho,
+    };
+  }
+
+  function rebuildCoverageFromCoords() {
+    updateCoverageFromCoords({ forceReset: true });
+  }
 
   async function loadCampoConfig(id) {
     const version = ++campoDatosVersion;
     if (!id) {
       maquinariaActual = null;
       maquinariaAncho = null;
-      clearCoverage(true);
-      updateFallbackArea();
+      updateCoverageFromCoords({ forceReset: true });
       return;
     }
     try {
@@ -178,19 +223,13 @@
       const widthValue = selected?.ancho;
       const widthNumber = Number(widthValue);
       maquinariaAncho = Number.isFinite(widthNumber) && widthNumber > 0 ? widthNumber : null;
-      if (maquinariaAncho && maquinariaAncho > 0) {
-        rebuildCoverageFromCoords();
-      } else {
-        clearCoverage(true);
-        updateFallbackArea();
-      }
+      updateCoverageFromCoords({ forceReset: true });
     } catch (e) {
       if (version !== campoDatosVersion) return;
       console.warn('[MAP] No se pudo cargar maquinaria del campo', e);
       maquinariaActual = null;
       maquinariaAncho = null;
-      clearCoverage(true);
-      updateFallbackArea();
+      updateCoverageFromCoords({ forceReset: true });
     }
   }
 
@@ -203,7 +242,6 @@
     const pdop = extra.pdop ?? null;
     const sats = extra.sats ?? null;
 
-    const prevCoord = coords.length ? coords[coords.length - 1] : null;
     const newCoord = [lon, lat];
 
     points.push({ ts, lat, lon, fix, pdop, sats });
@@ -212,16 +250,9 @@
     lastSats = sats;
     coords.push(newCoord);
 
-    if (maquinariaAncho && maquinariaAncho > 0 && prevCoord) {
-      addCoverageSegment(prevCoord, newCoord);
-    } else if (!maquinariaAncho || maquinariaAncho <= 0) {
-      if (coords.length >= 2 && coords.length % 5 === 0) {
-        updateFallbackArea();
-      }
-    }
+    updateCoverageFromCoords();
 
     const ll = L.latLng(lat, lon);
-    lineLayer.addLatLng(ll);
     if (!currentMarker) currentMarker = L.circleMarker(ll, { radius: 5 }).addTo(map);
     else currentMarker.setLatLng(ll);
 
@@ -234,6 +265,7 @@
     lastCampoIdLoaded = campoId;
     loadCampoConfig(campoId);
   }
+
 
 
   function connectWS() {
@@ -362,6 +394,45 @@
   }
 
   // Cargar y mostrar una capa GeoJSON en el mapa
+  function applySavedSnapshot(data) {
+    if (!data || typeof data !== 'object') return;
+    const metadata = data.metadata || data.properties || {};
+    if (metadata) {
+      if (maquinariaAncho == null && typeof metadata.maquinariaAncho === "number") {
+        maquinariaAncho = metadata.maquinariaAncho;
+      }
+      if (!maquinariaActual && typeof metadata.maquinaria === "string") {
+        maquinariaActual = metadata.maquinaria;
+      }
+    }
+    const features = Array.isArray(data.features) ? data.features : [];
+    let rawLine = Array.isArray(metadata.rawLine) ? metadata.rawLine : null;
+    const lineFeature = features.find(f => (f?.properties?.role === 'line') || (f?.geometry?.type === 'LineString')) || null;
+    const coverageFeature = features.find(f => (f?.properties?.role === 'coverage') || (f?.geometry?.type && f.geometry.type.includes('Polygon'))) || null;
+
+    if (!rawLine && lineFeature?.geometry?.type === 'LineString') {
+      rawLine = lineFeature.geometry.coordinates;
+    }
+
+    if (Array.isArray(rawLine) && rawLine.length) {
+      coords = rawLine.map(coord => (Array.isArray(coord) ? [...coord] : coord));
+      puntos = coords.length;
+      points = [];
+      updateCoverageFromCoords({ forceReset: true });
+    } else if (coverageFeature) {
+      try { coverageLayer && coverageLayer.remove(); } catch {}
+      coverageLayer = L.geoJSON(coverageFeature, {
+        style: () => ({ color: '#2e7d32', weight: 1, opacity: 0.75, fillColor: '#66bb6a', fillOpacity: 0.4 })
+      }).addTo(map);
+      currentCoverageFeature = coverageFeature;
+      try { areaHa = (turf.area(coverageFeature) / 10000).toFixed(3); } catch {}
+    }
+
+    if (typeof metadata.areaHa === 'number') {
+      areaHa = Number(metadata.areaHa).toFixed(3);
+    }
+  }
+
   async function loadSimGeoJSON(url) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -383,6 +454,7 @@
       if (coords && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
         gridOriginLL = L.latLng(coords[1], coords[0]);
         updateGrid();
+    applySavedSnapshot(data);
       }
     } catch {}
   }

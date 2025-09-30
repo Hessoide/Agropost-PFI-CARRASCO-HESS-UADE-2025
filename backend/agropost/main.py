@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnect
@@ -178,6 +178,18 @@ def _slugify_filename(nombre: str) -> str:
         raise HTTPException(status_code=400, detail='nombre invalido')
     return slug.lower()
 
+def _normalize_rec_filename(name: str) -> str:
+    name = (name or '').strip()
+    if not name:
+        raise HTTPException(status_code=400, detail='nombre requerido')
+    basename = Path(name).name
+    if not basename.lower().endswith('.geojson'):
+        raise HTTPException(status_code=400, detail='se requiere archivo .geojson')
+    stem = Path(basename).stem
+    slug = _slugify_filename(stem)
+    filename = f"{slug}.geojson"
+    return filename
+
 
 def _recorrido_url(campo_id: str, filename: str) -> str:
     parts = [
@@ -210,6 +222,84 @@ async def listar_recorridos(campo_id: str):
     ]
     return {'ok': True, 'recorridos': recorridos}
 
+
+@app.put('/api/campos/{campo_id}/recorridos/{filename}')
+async def guardar_recorrido_snapshot(campo_id: str, filename: str, request: Request):
+    campo_dir = _resolve_campo_dir(campo_id)
+    rec_dir = _ensure_recorridos_dir(campo_dir)
+    safe_name = _normalize_rec_filename(filename)
+    filepath = (rec_dir / safe_name).resolve()
+    try:
+        filepath.relative_to(rec_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail='nombre invalido')
+
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='payload invalido')
+
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='payload invalido')
+
+
+    def _as_feature(obj):
+        if not isinstance(obj, dict):
+            return None
+        if obj.get('type') == 'Feature' and isinstance(obj.get('geometry'), dict):
+            return obj
+        return None
+
+
+    def _apply_role(feature, role):
+        if feature is None:
+            return None
+        props = feature.get('properties')
+        if not isinstance(props, dict):
+            props = {}
+            feature['properties'] = props
+        props['role'] = role
+        return feature
+
+
+    line_feature = _apply_role(_as_feature(payload.get('line')), 'line')
+    coverage_feature = _apply_role(_as_feature(payload.get('coverage')), 'coverage')
+    features = []
+    if coverage_feature:
+        features.append(coverage_feature)
+    if line_feature:
+        features.append(line_feature)
+
+
+    if not features:
+        raise HTTPException(status_code=400, detail='sin datos para guardar')
+
+
+    metadata = payload.get('meta') if isinstance(payload.get('meta'), dict) else {}
+    metadata = dict(metadata)
+    raw_line = metadata.get('rawLine') if isinstance(metadata.get('rawLine'), list) else None
+    if not raw_line:
+        alt_raw = payload.get('rawLine')
+        if isinstance(alt_raw, list):
+            raw_line = alt_raw
+
+
+    fc = {
+        'type': 'FeatureCollection',
+        'features': features,
+        'metadata': metadata
+    }
+    meta_out = fc['metadata']
+    meta_out['updatedAt'] = datetime.now(timezone.utc).isoformat()
+    if raw_line:
+        meta_out['rawLine'] = raw_line
+
+
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    filepath.write_text(json.dumps(fc, ensure_ascii=False, indent=2), encoding='utf-8')
+    return {'ok': True}
 
 @app.post('/api/campos/{campo_id}/recorridos')
 async def crear_recorrido(campo_id: str, data: RecorridoCreate):

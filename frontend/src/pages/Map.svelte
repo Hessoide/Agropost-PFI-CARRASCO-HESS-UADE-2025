@@ -6,6 +6,8 @@
   let initLat = null, initLon = null, initZoom = 18, useMock = false;
   let geoUrl = null;
   let campoId = null;
+  let mapaRef;
+  let isSaving = false;
 
   function readParams() {
     const qs = new URLSearchParams((location.hash.split("?")[1] || ""));
@@ -27,16 +29,89 @@
     return () => window.removeEventListener("hashchange", readParams);
   });
 
-  // Fuerza remontar <Mapa/> cuando cambian parámetros o el hash
+  async function handleBeforeNavigate(event) {
+    if (isSaving) {
+      event.detail.cancel = true;
+      return;
+    }
+    if (!mapaRef || typeof mapaRef.getCurrentSnapshot !== 'function' || !campoId) {
+      return;
+    }
+    const snapshot = mapaRef.getCurrentSnapshot();
+    const hasData = snapshot && ((snapshot.coverage && snapshot.coverage.geometry) || (snapshot.line && snapshot.line.geometry) || (Array.isArray(snapshot.rawLine) && snapshot.rawLine.length > 1));
+    if (!hasData) {
+      return;
+    }
+
+    event.detail.cancel = true;
+    isSaving = true;
+    try {
+      await saveCurrentTrack(snapshot);
+      event.detail.navigate();
+    } catch (err) {
+      console.error('[map] guardar recorrido', err);
+      alert(`No se pudo guardar el recorrido: ${err.message || err}`);
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  async function saveCurrentTrack(snapshot) {
+    if (!campoId || !geoUrl) return;
+    let filename = decodeURIComponent(geoUrl.split('/').pop() || '');
+    if (!filename.endsWith('.geojson')) return;
+
+    const apiUrl = `/api/campos/${encodeURIComponent(campoId)}/recorridos/${encodeURIComponent(filename)}`;
+
+    const cloneFeatureWithRole = (feat, role) => {
+      if (!feat || typeof feat !== 'object' || feat.type !== 'Feature') return null;
+      const copy = JSON.parse(JSON.stringify(feat));
+      if (!copy.properties || typeof copy.properties !== 'object') copy.properties = {};
+      copy.properties.role = role;
+      return copy;
+    };
+
+    const lineFeature = cloneFeatureWithRole(snapshot.line, 'line');
+    const coverageFeature = cloneFeatureWithRole(snapshot.coverage, 'coverage');
+
+    const payload = {
+      line: lineFeature,
+      coverage: coverageFeature,
+      meta: {
+        savedAt: new Date().toISOString(),
+        areaHa: snapshot.areaHa ? Number(snapshot.areaHa) || 0 : 0,
+        maquinaria: snapshot.maquinaria || null,
+        maquinariaAncho: snapshot.maquinariaAncho || null,
+        rawPointCount: Array.isArray(snapshot.rawLine) ? snapshot.rawLine.length : 0
+      }
+    };
+
+    if (Array.isArray(snapshot.rawLine) && snapshot.rawLine.length) {
+      payload.meta.rawLine = snapshot.rawLine;
+    }
+
+    const res = await fetch(apiUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => res.statusText);
+      throw new Error(msg || `HTTP ${res.status}`);
+    }
+  }
+
+
   $: componentKey = JSON.stringify({ initLat, initLon, initZoom, useMock, geoUrl, campoId });
 </script>
 
-<div class="ui"><BackButton /></div>
+
+<div class="ui"><BackButton on:beforeNavigate={handleBeforeNavigate} /></div>
 
 <div class="page">
   {#key componentKey}
-    <!-- Modo minimal solo cuando NO es simulación -->
-    <Mapa {initLat} {initLon} {initZoom} {useMock} {geoUrl} {campoId} minimal={false} />
+    <!-- Modo minimal solo cuando NO es simulaci9n -->
+    <Mapa bind:this={mapaRef} {initLat} {initLon} {initZoom} {useMock} {geoUrl} {campoId} minimal={false} />
   {/key}
 </div>
 
