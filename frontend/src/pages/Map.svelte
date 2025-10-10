@@ -111,7 +111,7 @@
 <div class="page">
   {#key componentKey}
     <!-- Modo minimal solo cuando NO es simulaci9n -->
-    <Mapa bind:this={mapaRef} {initLat} {initLon} {initZoom} {useMock} {geoUrl} {campoId} minimal={false} />
+    <Mapa bind:this={mapaRef} {initLat} {initLon} {initZoom} {useMock} {geoUrl} {campoId} minimal={false} noTiles={true} showScale={true} showGrid={true} />
   {/key}
 </div>
 

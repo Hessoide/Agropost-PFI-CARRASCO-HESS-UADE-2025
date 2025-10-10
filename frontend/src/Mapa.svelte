@@ -39,6 +39,7 @@
   let gridOriginLL = null;
 
   let coverageLayer;                 // poligono de cobertura dinamico
+  let campoAreaLayer;
   let maquinariaActual = null;
   let maquinariaAncho = null;
   let campoDatosVersion = 0;
@@ -199,6 +200,8 @@
       maquinariaActual = null;
       maquinariaAncho = null;
       updateCoverageFromCoords({ forceReset: true });
+      await loadCampoArea(id);
+      await loadCampoArea(null);
       return;
     }
     try {
@@ -224,12 +227,14 @@
       const widthNumber = Number(widthValue);
       maquinariaAncho = Number.isFinite(widthNumber) && widthNumber > 0 ? widthNumber : null;
       updateCoverageFromCoords({ forceReset: true });
+      await loadCampoArea(id);
     } catch (e) {
       if (version !== campoDatosVersion) return;
       console.warn('[MAP] No se pudo cargar maquinaria del campo', e);
       maquinariaActual = null;
       maquinariaAncho = null;
       updateCoverageFromCoords({ forceReset: true });
+      await loadCampoArea(id);
     }
   }
 
@@ -330,6 +335,7 @@
         connectWS();
       }
     }
+    await loadCampoArea(campoId);
 
     // Si nos pasaron un GeoJSON directo, lo cargamos
     if (geoUrl) {
@@ -376,6 +382,7 @@
 
   onDestroy(() => {
     try { ws && ws.close(); } catch {}
+    try { campoAreaLayer && campoAreaLayer.remove(); } catch {}
     try { clearCoverage(); } catch {}
     try { window.removeEventListener('resize', ensureSize); } catch {}
     try { map && map.off('move', scheduleRaf); } catch {}
@@ -430,6 +437,36 @@
 
     if (typeof metadata.areaHa === 'number') {
       areaHa = Number(metadata.areaHa).toFixed(3);
+    }
+  }
+
+  async function loadCampoArea(cId) {
+    if (!map) return;
+    if (!cId) {
+      try { campoAreaLayer && campoAreaLayer.remove(); } catch {}
+      campoAreaLayer = null;
+      return;
+    }
+    const url = `/campos%20guardados/${encodeURIComponent(cId)}/area.geojson`;
+    try {
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      try { campoAreaLayer && campoAreaLayer.remove(); } catch {}
+      campoAreaLayer = L.geoJSON(data, {
+        style: () => ({ color: '#2c7fb8', weight: 1.5, opacity: 0.6, fillColor: '#7fcdbb', fillOpacity: 0.18 })
+      }).addTo(map);
+      try { campoAreaLayer.bringToBack(); } catch {}
+      try {
+        const center = turf.centerOfMass(data);
+        const coords = center?.geometry?.coordinates;
+        if (coords && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+          gridOriginLL = L.latLng(coords[1], coords[0]);
+          updateGrid();
+        }
+      } catch {}
+    } catch (e) {
+      console.warn('[MAP] area load error', e);
     }
   }
 
