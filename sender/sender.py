@@ -39,7 +39,7 @@ def cmd_simulate(args):
         try:
             # avanza en línea y gira suavemente
             dlat, dlon = meters_to_deg(step, lat)
-            lat += dlat * math.cos(math.radians(bearing))
+            lat += dlat * math.cos(math.radians(bearing)) + 0.00001
             lon += dlon * math.sin(math.radians(bearing))
             bearing = (bearing + 7) % 360
             resp = post_pos(host, port, lat, lon, fix=args.fix, pdop=args.pdop, sats=args.sats)

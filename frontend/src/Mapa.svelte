@@ -39,6 +39,7 @@
   let gridOriginLL = null;
 
   let coverageLayer;                 // poligono de cobertura dinamico
+  let coverageTailLayer;             // capa para el cap final
   let campoAreaLayer;
   let maquinariaActual = null;
   let maquinariaAncho = null;
@@ -51,6 +52,7 @@
   let currentLineCoords = [];
   let currentLineFeature = null;
   let currentCoverageFeature = null;
+  let currentTailFeature = null;
 
 
 
@@ -79,8 +81,13 @@
     if (coverageLayer) {
       try { coverageLayer.remove(); } catch {}
     }
+    if (coverageTailLayer) {
+      try { coverageTailLayer.remove(); } catch {}
+    }
     coverageLayer = null;
+    coverageTailLayer = null;
     currentCoverageFeature = null;
+    currentTailFeature = null;
     if (resetArea) areaHa = '0.000';
   }
 
@@ -88,7 +95,7 @@
     if (coords.length >= 2) {
       try {
         const line = turf.lineString(getSmoothedCoords(coords));
-        const buff = turf.buffer(line, 1.0, { units: 'meters', steps: 16, endCapStyle: 'round', joinStyle: 'round' });
+        const buff = bufferWithOptions(line, 1.0, { units: 'meters', steps: 16, endCapStyle: 'round', joinStyle: 'round' });
         areaHa = (turf.area(buff) / 10000).toFixed(3);
       } catch {
         areaHa = '0.000';
@@ -113,6 +120,18 @@
     return source.slice();
   }
 
+  function bufferWithOptions(feature, radius, options) {
+    return /** @type {any} */ (turf.buffer)(feature, radius, /** @type {any} */ (options));
+  }
+
+  function unionFeatures(a, b) {
+    return /** @type {any} */ (turf.union)(a, b);
+  }
+
+  function differenceFeatures(a, b) {
+    return /** @type {any} */ (turf.difference)(a, b);
+  }
+
   function updateRouteLine(lineCoords) {
     currentLineCoords = Array.isArray(lineCoords) ? lineCoords.map(([lon, lat]) => [lon, lat]) : [];
     if (lineLayer) {
@@ -123,6 +142,60 @@
       currentLineFeature = currentLineCoords.length >= 2 ? turf.lineString(currentLineCoords) : null;
     } catch (e) {
       currentLineFeature = null;
+    }
+  }
+
+  function buildHalfDiskPolygon(centerCoords, radiusMeters, bearingDegrees, side = 'front', steps = 24) {
+    if (!Array.isArray(centerCoords) || centerCoords.length < 2) return null;
+    if (!(radiusMeters > 0)) return null;
+    const sweepStart = side === 'back'
+      ? bearingDegrees + 90
+      : bearingDegrees - 90;
+    const sweepEnd = sweepStart + 180;
+    const centerPoint = turf.point([centerCoords[0], centerCoords[1]]);
+    const ring = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const angle = sweepStart + (sweepEnd - sweepStart) * t;
+      const dest = turf.destination(centerPoint, radiusMeters, angle, { units: 'meters' });
+      const coord = dest?.geometry?.coordinates;
+      if (Array.isArray(coord)) ring.push(coord);
+    }
+    if (ring.length < 2) return null;
+    ring.push(ring[0]);
+    try {
+      return turf.polygon([ring]);
+    } catch {
+      return null;
+    }
+  }
+
+  function buildTailCoverage(smoothed, widthMeters) {
+    if (!Array.isArray(smoothed) || smoothed.length < 2) return null;
+    const radius = widthMeters / 2;
+    if (!(radius > 0)) return null;
+    const tail = smoothed[smoothed.length - 1];
+    const prev = smoothed[smoothed.length - 2];
+    if (!Array.isArray(tail) || !Array.isArray(prev)) return null;
+    try {
+      const tailLine = turf.lineString([prev, tail]);
+      let coverage = /** @type {any} */ (bufferWithOptions(tailLine, radius, {
+        units: 'meters',
+        steps: 32,
+        endCapStyle: 'flat',
+        joinStyle: 'round'
+      }));
+      const bearing = turf.bearing(turf.point(prev), turf.point(tail));
+      if (Number.isFinite(bearing)) {
+        const backHalf = buildHalfDiskPolygon(tail, radius, bearing, 'back');
+        if (backHalf) {
+          coverage = coverage ? unionFeatures(coverage, backHalf) : backHalf;
+        }
+      }
+      return coverage;
+    } catch (e) {
+      console.warn('[MAP] tail coverage error', e);
+      return null;
     }
   }
 
@@ -147,27 +220,77 @@
     }
 
     try {
-      const line = turf.lineString(smoothed);
-      const buff = turf.buffer(line, maquinariaAncho / 2, {
-        units: 'meters',
-        steps: 32,
-        endCapStyle: 'round',
-        joinStyle: 'round'
-      });
-      if (!buff || !buff.geometry) {
+      const radius = maquinariaAncho / 2;
+      let coverageFeature = /** @type {any} */ (null);
+      let greenFeature = /** @type {any} */ (null);
+      const headCoords = smoothed.slice(0, -1);
+      if (headCoords.length >= 2) {
+        const headLine = turf.lineString(headCoords);
+        coverageFeature = bufferWithOptions(headLine, radius, {
+          units: 'meters',
+          steps: 32,
+          endCapStyle: 'round',
+          joinStyle: 'round'
+        });
+        greenFeature = coverageFeature;
+      }
+      const tailCoverage = buildTailCoverage(smoothed, maquinariaAncho);
+      if (tailCoverage) {
+        coverageFeature = coverageFeature ? unionFeatures(coverageFeature, tailCoverage) : tailCoverage;
+        if (greenFeature) {
+          try {
+            const diff = differenceFeatures(greenFeature, tailCoverage);
+            if (diff && diff.geometry) {
+              greenFeature = diff;
+            } else if (!diff) {
+              greenFeature = null;
+            }
+          } catch (e) {
+            console.warn('[MAP] coverage diff error', e);
+          }
+        }
+      }
+      if (!greenFeature || !greenFeature.geometry) {
+        greenFeature = null;
+      }
+      if (!coverageFeature || !coverageFeature.geometry) {
         clearCoverage(false);
         return;
       }
-      areaHa = (turf.area(buff) / 10000).toFixed(3);
-      if (coverageLayer) {
-        coverageLayer.clearLayers();
-      currentCoverageFeature = buff;
-        coverageLayer.addData(buff);
-      } else {
-      currentCoverageFeature = buff;
-        coverageLayer = L.geoJSON(buff, {
-          style: () => ({ color: '#2e7d32', weight: 1, opacity: 0.75, fillColor: '#66bb6a', fillOpacity: 0.4 })
-        }).addTo(map);
+      areaHa = (turf.area(coverageFeature) / 10000).toFixed(3);
+      currentCoverageFeature = coverageFeature;
+      currentTailFeature = tailCoverage ?? null;
+
+      if (greenFeature) {
+        if (coverageLayer) {
+          coverageLayer.clearLayers();
+          coverageLayer.addData(greenFeature);
+          try { coverageLayer.bringToBack(); } catch {}
+        } else {
+          coverageLayer = L.geoJSON(greenFeature, {
+            style: () => ({ color: '#2e7d32', weight: 1, opacity: 0.75, fillColor: '#66bb6a', fillOpacity: 0.4 })
+          }).addTo(map);
+          try { coverageLayer.bringToBack(); } catch {}
+        }
+      } else if (coverageLayer) {
+        try { coverageLayer.remove(); } catch {}
+        coverageLayer = null;
+      }
+
+      if (tailCoverage && tailCoverage.geometry) {
+        if (coverageTailLayer) {
+          coverageTailLayer.clearLayers();
+          coverageTailLayer.addData(tailCoverage);
+          try { coverageTailLayer.bringToFront(); } catch {}
+        } else {
+          coverageTailLayer = L.geoJSON(tailCoverage, {
+            style: () => ({ color: '#b71c1c', weight: 1, opacity: 0.75, fillColor: '#ef5350', fillOpacity: 0.5 })
+          }).addTo(map);
+          try { coverageTailLayer.bringToFront(); } catch {}
+        }
+      } else if (coverageTailLayer) {
+        try { coverageTailLayer.remove(); } catch {}
+        coverageTailLayer = null;
       }
     } catch (e) {
       console.warn('[MAP] coverage buffer error', e);
@@ -377,7 +500,11 @@
     }
 
     // Helpers globales para pruebas rÃ¡pidas en consola
-    try { window.__addRoutePoint = addRoutePoint; window.__loadGeoJSON = loadSimGeoJSON; } catch {}
+    try {
+      const w = /** @type {any} */ (window);
+      w.__addRoutePoint = addRoutePoint;
+      w.__loadGeoJSON = loadSimGeoJSON;
+    } catch {}
   });
 
   onDestroy(() => {
