@@ -1,3 +1,4 @@
+
 <script>
   import BackButton from "../components/BackButton.svelte";
   import Mapa from "../Mapa.svelte";
@@ -23,7 +24,7 @@
 
 <div class="page">
   {#if geoUrl}
-    <Mapa minimal={false} noTiles={true} geoUrl={geoUrl} campoId={id} showScale={true} showGrid={true} />
+    <Mapa minimal={false} noTiles={true} {geoUrl} showScale={true} showGrid={true} />
   {:else}
     <div class="empty">Falta el parámetro id del campo.</div>
   {/if}
