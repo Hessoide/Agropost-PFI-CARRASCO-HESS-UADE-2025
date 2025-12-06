@@ -30,7 +30,7 @@ Desarrollar un sistema basado en GNSS y RTK que permita obtener ubicación preci
 ## Como correr el proyecto:
 
 - 
-- python .\sender\sender.py --host 192.168.56.1 --port 8000 geojson ".\frontend\public\geo\recorrido.geojson" --rate 2 --loop
+- python .\sender\sender.py --host 192.168.0.11 --port 8000 geojson ".\frontend\public\geo\recorrido.geojson" --rate 2 --loop
 
 192.168.56.1
 

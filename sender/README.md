@@ -17,9 +17,10 @@ Esto crea un venv, instala dependencias y ejecuta un check de salud.
 Uso (CLI)
 ```
 cd sender
-python sender.py --host 192.168.1.10 --port 8000 simulate --rate 2 --meters 0.5
+python sender.py --host 10.186.99.7 --port 8000 simulate --rate 2 --meters 0.5
 python sender.py --host 192.168.1.10 --port 8000 geojson campo.geojson --rate 2 --loop
 ```
+192.168.0.11
 
 Comandos
 - `simulate`: genera puntos alrededor de una ubicación (por defecto Obelisco) o la que pases con `--lat/--lon`.
