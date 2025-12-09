@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import Home from "./pages/Home.svelte";
   import MapPage from "./pages/Map.svelte";
-  import Config from "./pages/Config.svelte";
   import Registros from "./pages/Registros.svelte";
   import NotFound from "./pages/NotFound.svelte";
   import Campo from "./pages/Campo.svelte";
@@ -19,7 +18,6 @@
     "/campo-menu": CampoMenu,
     "/campo-ver": CampoVer,
     "/maquinaria": Maquinaria,
-    "/config": Config,
     "/registros": Registros,
     "/campo": Campo,
   };

@@ -11,6 +11,8 @@
   let guardando = false;
   let saveError = null;
   let campoGuardado = false;
+  let campoIdCreado = null;
+  let mapaRef;
 
   function updateFromHash() {
     const qs = new URLSearchParams((location.hash.split("?")[1] || ""));
@@ -42,6 +44,59 @@
     return `HTTP ${res.status}`;
   }
 
+  function hasSnapshotData(snapshot) {
+    if (!snapshot) return false;
+    const hasCoverage = snapshot.coverage && snapshot.coverage.geometry;
+    const hasLine = snapshot.line && snapshot.line.geometry;
+    const hasRaw = Array.isArray(snapshot.rawLine) && snapshot.rawLine.length > 1;
+    return Boolean(hasCoverage || hasLine || hasRaw);
+  }
+
+  async function guardarArea(campoId) {
+    if (!mapaRef || typeof mapaRef.getCurrentSnapshot !== "function") {
+      throw new Error("No hay datos del mapa para guardar.");
+    }
+    const snap = mapaRef.getCurrentSnapshot();
+    if (!hasSnapshotData(snap)) {
+      throw new Error("No hay trayectoria para guardar como área.");
+    }
+
+    const cloneFeatureWithRole = (feat, role) => {
+      if (!feat || typeof feat !== "object" || feat.type !== "Feature") return null;
+      const copy = JSON.parse(JSON.stringify(feat));
+      if (!copy.properties || typeof copy.properties !== "object") copy.properties = {};
+      copy.properties.role = role;
+      return copy;
+    };
+
+    const lineFeature = cloneFeatureWithRole(snap.line, "line");
+    const coverageFeature = cloneFeatureWithRole(snap.coverage, "coverage");
+
+    const payload = {
+      line: lineFeature,
+      coverage: coverageFeature,
+      meta: {
+        savedAt: new Date().toISOString(),
+        areaHa: Number.isFinite(snap.areaHa) ? snap.areaHa : null,
+        maquinaria: snap.maquinaria || null,
+        maquinariaAncho: snap.maquinariaAncho || null,
+        rawPointCount: Array.isArray(snap.rawLine) ? snap.rawLine.length : 0,
+      },
+    };
+    if (Array.isArray(snap.rawLine) && snap.rawLine.length) {
+      payload.meta.rawLine = snap.rawLine;
+    }
+
+    const res = await fetch(`/api/campos/${encodeURIComponent(campoId)}/area`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorResponse(res));
+    }
+  }
+
   async function guardarCampo() {
     if (!campoNombre) {
       saveError = "Falta el nombre del campo.";
@@ -51,20 +106,26 @@
     saveError = null;
     campoGuardado = false;
     try {
-      const res = await fetch("/api/campos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nombre: campoNombre })
-      });
-      if (!res.ok) {
-        throw new Error(await parseErrorResponse(res));
+      if (!campoIdCreado) {
+        const res = await fetch("/api/campos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nombre: campoNombre })
+        });
+        if (!res.ok) {
+          throw new Error(await parseErrorResponse(res));
+        }
+        const data = await res.json();
+        campoIdCreado = data?.campo?.id || null;
       }
-      const data = await res.json();
+
+      if (!campoIdCreado) {
+        throw new Error("No se pudo obtener el id del campo.");
+      }
+
+      await guardarArea(campoIdCreado);
       campoGuardado = true;
-      const nextId = data?.campo?.id;
-      if (nextId) {
-        location.hash = `#/campo-menu?id=${encodeURIComponent(nextId)}`;
-      }
+      location.hash = `#/campo-menu?id=${encodeURIComponent(campoIdCreado)}`;
     } catch (e) {
       saveError = e instanceof Error ? e.message : String(e);
     } finally {
@@ -97,7 +158,7 @@
 </div>
 
 <div class="page">
-  <Mapa minimal={false} noTiles={true} {geoUrl} showScale={true} showGrid={true} />
+  <Mapa bind:this={mapaRef} minimal={false} noTiles={true} {geoUrl} showScale={true} showGrid={true} />
 </div>
 
 <style>

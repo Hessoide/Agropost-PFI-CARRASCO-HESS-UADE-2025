@@ -28,7 +28,7 @@
 
   let coords = [];                   // [lon, lat]
   let points = [];                   // {ts, lat, lon, ...}
-  let areaHa = '0.000';
+  let areaHa = null;
   let fixText = '';
   let fuente = '';
   let puntos = 0;                    // contador visible
@@ -39,7 +39,7 @@
   let gridOriginLL = null;
 
   let coverageLayer;                 // poligono de cobertura dinamico
-  let coverageTailLayer;             // capa para el cap final
+  let coverageTailLayer;             // capa para el cap final (no usado en modo simple)
   let campoAreaLayer;
   let maquinariaActual = null;
   let maquinariaAncho = null;
@@ -88,36 +88,33 @@
     coverageTailLayer = null;
     currentCoverageFeature = null;
     currentTailFeature = null;
-    if (resetArea) areaHa = '0.000';
+    if (resetArea) areaHa = null;
   }
 
-  function updateFallbackArea() {
-    if (coords.length >= 2) {
-      try {
-        const line = turf.lineString(getSmoothedCoords(coords));
-        const buff = bufferWithOptions(line, 1.0, { units: 'meters', steps: 16, endCapStyle: 'round', joinStyle: 'round' });
-        areaHa = (turf.area(buff) / 10000).toFixed(3);
-      } catch {
-        areaHa = '0.000';
-      }
-    } else {
-      areaHa = '0.000';
-    }
-  }
-
+  const TAIL_SMOOTH_POINTS = 6;
   function getSmoothedCoords(source) {
     if (!Array.isArray(source) || source.length < SMOOTH_MIN_POINTS) {
       return Array.isArray(source) ? source.slice() : [];
     }
+    const len = source.length;
+    const tailCount = Math.min(TAIL_SMOOTH_POINTS, len);
+    const stableCount = Math.max(0, len - tailCount);
+    const stablePart = source.slice(0, stableCount);
+    const tailRaw = source.slice(Math.max(0, len - tailCount - 1)); // incluye un ancla previa para continuidad
+    let tailSmooth = tailRaw;
     try {
-      const line = turf.lineString(source);
+      const line = turf.lineString(tailRaw);
       const smooth = turf.bezierSpline(line, { resolution: SMOOTH_RESOLUTION, sharpness: 0.85 });
       const coords = smooth?.geometry?.coordinates;
-      if (Array.isArray(coords) && coords.length) return coords;
+      if (Array.isArray(coords) && coords.length) {
+        tailSmooth = coords;
+        // asegurar que el primer punto coincide con el ancla original para no mover lo ya pasado
+        if (tailSmooth.length) tailSmooth[0] = tailRaw[0];
+      }
     } catch (e) {
       console.warn('[MAP] smoothing error', e);
     }
-    return source.slice();
+    return stablePart.concat(tailSmooth);
   }
 
   function bufferWithOptions(feature, radius, options) {
@@ -199,14 +196,24 @@
     }
   }
 
-  function updateCoverageFromCoords({ forceReset = false } = {}) {
+  const COVERAGE_THROTTLE_MS = 120;
+  let lastCoverageUpdate = 0;
+
+  function updateCoverageFromCoords({ forceReset = false, throttle = true } = {}) {
     if (!map || minimal) return;
     if (forceReset) clearCoverage(true);
 
     if (!coords.length) {
       clearCoverage(true);
+      areaHa = null;
       return;
     }
+
+    const now = (performance && performance.now) ? performance.now() : Date.now();
+    if (throttle && !forceReset && (now - lastCoverageUpdate) < COVERAGE_THROTTLE_MS) {
+      return;
+    }
+    lastCoverageUpdate = now;
 
     const hasWidth = maquinariaAncho && maquinariaAncho > 0;
     const smoothed = getSmoothedCoords(coords);
@@ -215,80 +222,41 @@
 
     if (!hasWidth || smoothed.length < 2) {
       clearCoverage(false);
-      updateFallbackArea();
+      areaHa = computePolygonAreaHa(smoothed) ?? null;
       return;
     }
 
     try {
       const radius = maquinariaAncho / 2;
-      let coverageFeature = /** @type {any} */ (null);
-      let greenFeature = /** @type {any} */ (null);
-      const headCoords = smoothed.slice(0, -1);
-      if (headCoords.length >= 2) {
-        const headLine = turf.lineString(headCoords);
-        coverageFeature = bufferWithOptions(headLine, radius, {
-          units: 'meters',
-          steps: 32,
-          endCapStyle: 'round',
-          joinStyle: 'round'
-        });
-        greenFeature = coverageFeature;
-      }
-      const tailCoverage = buildTailCoverage(smoothed, maquinariaAncho);
-      if (tailCoverage) {
-        coverageFeature = coverageFeature ? unionFeatures(coverageFeature, tailCoverage) : tailCoverage;
-        if (greenFeature) {
-          try {
-            const diff = differenceFeatures(greenFeature, tailCoverage);
-            if (diff && diff.geometry) {
-              greenFeature = diff;
-            } else if (!diff) {
-              greenFeature = null;
-            }
-          } catch (e) {
-            console.warn('[MAP] coverage diff error', e);
-          }
-        }
-      }
-      if (!greenFeature || !greenFeature.geometry) {
-        greenFeature = null;
-      }
+      const line = turf.lineString(smoothed);
+      const coverageFeature = bufferWithOptions(line, radius, {
+        units: 'meters',
+        steps: 32,
+        endCapStyle: 'round',
+        joinStyle: 'round'
+      });
+
       if (!coverageFeature || !coverageFeature.geometry) {
         clearCoverage(false);
         return;
       }
-      areaHa = (turf.area(coverageFeature) / 10000).toFixed(3);
-      currentCoverageFeature = coverageFeature;
-      currentTailFeature = tailCoverage ?? null;
 
-      if (greenFeature) {
-        if (coverageLayer) {
-          coverageLayer.clearLayers();
-          coverageLayer.addData(greenFeature);
-          try { coverageLayer.bringToBack(); } catch {}
-        } else {
-          coverageLayer = L.geoJSON(greenFeature, {
-            style: () => ({ color: '#2e7d32', weight: 1, opacity: 0.75, fillColor: '#66bb6a', fillOpacity: 0.4 })
-          }).addTo(map);
-          try { coverageLayer.bringToBack(); } catch {}
-        }
-      } else if (coverageLayer) {
-        try { coverageLayer.remove(); } catch {}
-        coverageLayer = null;
+      currentTailFeature = null;
+      areaHa = Number((turf.area(coverageFeature) / 10000).toFixed(3));
+      currentCoverageFeature = coverageFeature;
+
+      if (coverageLayer) {
+        coverageLayer.clearLayers();
+        coverageLayer.addData(coverageFeature);
+        try { coverageLayer.bringToBack(); } catch {}
+      } else {
+        coverageLayer = L.geoJSON(coverageFeature, {
+          style: () => ({ color: '#2e7d32', weight: 1, opacity: 0.75, fillColor: '#66bb6a', fillOpacity: 0.4 })
+        }).addTo(map);
+        try { coverageLayer.bringToBack(); } catch {}
       }
 
-      if (tailCoverage && tailCoverage.geometry) {
-        if (coverageTailLayer) {
-          coverageTailLayer.clearLayers();
-          coverageTailLayer.addData(tailCoverage);
-          try { coverageTailLayer.bringToFront(); } catch {}
-        } else {
-          coverageTailLayer = L.geoJSON(tailCoverage, {
-            style: () => ({ color: '#b71c1c', weight: 1, opacity: 0.75, fillColor: '#ef5350', fillOpacity: 0.5 })
-          }).addTo(map);
-          try { coverageTailLayer.bringToFront(); } catch {}
-        }
-      } else if (coverageTailLayer) {
+      if (coverageTailLayer) {
         try { coverageTailLayer.remove(); } catch {}
         coverageTailLayer = null;
       }
@@ -307,7 +275,7 @@
       line: cloneFeature(currentLineFeature),
       coverage: cloneFeature(currentCoverageFeature),
       rawLine: coords.map(([lon, lat]) => [lon, lat]),
-      areaHa: parseFloat(areaHa) || 0,
+      areaHa: areaHa != null ? Number(areaHa) : null,
       maquinaria: maquinariaActual,
       maquinariaAncho: maquinariaAncho,
     };
@@ -559,11 +527,14 @@
         style: () => ({ color: '#2e7d32', weight: 1, opacity: 0.75, fillColor: '#66bb6a', fillOpacity: 0.4 })
       }).addTo(map);
       currentCoverageFeature = coverageFeature;
-      try { areaHa = (turf.area(coverageFeature) / 10000).toFixed(3); } catch {}
+      try { areaHa = Number((turf.area(coverageFeature) / 10000).toFixed(3)); } catch { areaHa = null; }
     }
 
     if (typeof metadata.areaHa === 'number') {
-      areaHa = Number(metadata.areaHa).toFixed(3);
+      areaHa = Number(metadata.areaHa);
+    }
+    if (areaHa == null && Array.isArray(rawLine) && rawLine.length) {
+      areaHa = computePolygonAreaHa(rawLine) ?? areaHa;
     }
   }
 
@@ -793,9 +764,37 @@
     rafPending = true;
     raf = requestAnimationFrame(() => {
       rafPending = false;
-      updateScale();
-      updateGrid();
+      const now = (performance && performance.now) ? performance.now() : Date.now();
+      if (!lastGridUpdate || (now - lastGridUpdate) >= GRID_THROTTLE_MS) {
+        lastGridUpdate = now;
+        updateScale();
+        updateGrid();
+      }
     });
+  }
+
+  const GRID_THROTTLE_MS = 150;
+  let lastGridUpdate = 0;
+
+  function computePolygonAreaHa(lineCoords) {
+    if (!Array.isArray(lineCoords) || lineCoords.length < 3) return null;
+    const ring = lineCoords
+      .map(([lon, lat]) => [lon, lat])
+      .filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    if (ring.length < 3) return null;
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+      ring.push([first[0], first[1]]);
+    }
+    try {
+      const poly = turf.polygon([ring]);
+      const area = turf.area(poly);
+      if (!Number.isFinite(area)) return null;
+      return Number((area / 10000).toFixed(3));
+    } catch {
+      return null;
+    }
   }
 </script>
 
@@ -807,10 +806,8 @@
 
   {#if !minimal}
     <div class="hud">
-      <div>Fuente: {fuente}</div>
-      <div>Fix: {fixText}</div>
       <div>Puntos: {puntos}</div>
-      <div>Area: {areaHa} ha</div>
+      <div>Area: {areaHa != null ? areaHa.toFixed(3) : '--'} ha</div>
       <div>Maquinaria: {maquinariaActual ?? "ninguna"}</div>
       <div>Ancho activo: {maquinariaAncho ? `${maquinariaAncho} m` : "sin dato"}</div>
       {#if lastPdop != null}
@@ -820,7 +817,6 @@
         <div>Sats: {lastSats}</div>
       {/if}
       <button class="btn" on:click={recenter}>Recentrar</button>
-      <button class="btn" on:click={exportCSV}>CSV</button>
     </div>
   {/if}
   {#if showScale}
@@ -834,7 +830,8 @@
 <style>
   .wrap { position: relative; width: 100%; height: 100%; }
   .map  { position: absolute; inset: 0; }
-  .hud  { position:absolute; top:10px; left:72px; background:#0009; color:#fff; padding:8px 12px; border-radius:8px; display:flex; gap:10px; z-index:1500; }
+  .hud  { position:absolute; top:12px; right:12px; background:#0009; color:#fff; padding:10px 14px; border-radius:10px; display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; z-index:1500; max-width:520px; width:min(520px, calc(100% - 24px)); align-items:center; }
+  .hud .btn{ justify-self:end; }
   .btn  { padding:.6rem .9rem; border:1px solid #ccc; border-radius:.5rem; background:#fff; color:#111; cursor:pointer; }
 
   .grid { position:absolute; inset:0; pointer-events:none; z-index:900; }

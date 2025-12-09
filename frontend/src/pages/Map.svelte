@@ -79,7 +79,7 @@
       coverage: coverageFeature,
       meta: {
         savedAt: new Date().toISOString(),
-        areaHa: snapshot.areaHa ? Number(snapshot.areaHa) || 0 : 0,
+        areaHa: Number.isFinite(snapshot.areaHa) ? snapshot.areaHa : null,
         maquinaria: snapshot.maquinaria || null,
         maquinariaAncho: snapshot.maquinariaAncho || null,
         rawPointCount: Array.isArray(snapshot.rawLine) ? snapshot.rawLine.length : 0

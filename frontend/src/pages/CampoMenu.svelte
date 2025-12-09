@@ -11,6 +11,9 @@
   let createError = null;
   let deleting = false;
   let deleteError = null;
+  let areaHa = null;
+  let areaError = null;
+  let areaLoading = false;
 
   let recorridos = [];
   let listLoading = false;
@@ -47,6 +50,7 @@
     if (nextId !== id) {
       id = nextId;
       resetState();
+      loadArea();
     }
   }
 
@@ -170,6 +174,38 @@
     }
   }
 
+  async function loadArea() {
+    if (!id) {
+      areaHa = null;
+      areaError = null;
+      return;
+    }
+    const campoActual = id;
+    areaLoading = true;
+    areaError = null;
+    try {
+      const res = await fetch(`/campos%20guardados/${encodeURIComponent(campoActual)}/area.geojson`, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const meta = (data && (data.metadata || data.properties)) || {};
+      const rawVal = meta ? meta.areaHa : null;
+      const parsed = typeof rawVal === "number" ? rawVal : (typeof rawVal === "string" ? parseFloat(rawVal) : null);
+      const val = Number.isFinite(parsed) ? parsed : null;
+      if (id === campoActual) {
+        areaHa = val;
+      }
+    } catch (e) {
+      if (id === campoActual) {
+        areaHa = null;
+        areaError = e instanceof Error ? e.message : String(e);
+      }
+    } finally {
+      if (id === campoActual) {
+        areaLoading = false;
+      }
+    }
+  }
+
 </script>
 
 <div class="ui"><BackButton forceFallback={true} fallback="#/" /></div>
@@ -177,6 +213,17 @@
 <main class="menu-campo">
   <section class="panel">
     <h1>Campo seleccionado: {id ?? '(sin id)'}</h1>
+    <p class="area">
+      {#if areaLoading}
+        Cargando área...
+      {:else if areaError}
+        Área: sin datos ({areaError})
+      {:else if areaHa != null}
+        Área: {areaHa.toFixed(3)} ha
+      {:else}
+        Área: sin datos
+      {/if}
+    </p>
 
     {#if !id}
       <p>No se especifico el campo.</p>
@@ -255,6 +302,7 @@
   .menu-campo{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
   .panel{ display:grid; gap:16px; width:100%; max-width:540px; }
   .acciones{ display:flex; flex-wrap:wrap; gap:12px; }
+  .area{ margin:0 0 4px; opacity:.8; }
   .btn{ padding:10px 14px; border:1px solid #aaa; border-radius:6px; text-decoration:none; background:#fff; color:#111; display:inline-flex; align-items:center; gap:6px; cursor:pointer; transition:background .15s ease; }
   .btn.danger{ border-color:#c62828; color:#b71c1c; }
   .btn.danger:not(:disabled){ background:#fdecea; }
